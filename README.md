@@ -55,6 +55,9 @@ export GUILE_LOAD_PATH="/usr/local/share/guile/site/2.2${GUILE_LOAD_PATH:+:}$GUI
 export GUILE_LOAD_COMPILED_PATH="/usr/local/lib/guile/2.2/site-ccache${GUILE_LOAD_COMPILED_PATH:+:}$GUILE_COMPILED_LOAD_PATH"
 ```
 
+You also need to have the GUILE environment variable set. If the output of `echo $GUILE` is empty you should specify the path using `./configure GUILE=$(which guile)`.
+
+
 To build from git requires Autoconf and Automake.
 ```sh
 ./bootstrap
