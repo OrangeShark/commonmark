@@ -55,6 +55,12 @@ export GUILE_LOAD_PATH="/usr/local/share/guile/site/2.2${GUILE_LOAD_PATH:+:}$GUI
 export GUILE_LOAD_COMPILED_PATH="/usr/local/lib/guile/2.2/site-ccache${GUILE_LOAD_COMPILED_PATH:+:}$GUILE_COMPILED_LOAD_PATH"
 ```
 
+You can manually specify the locatation of GUILE using `./configure GUILE=$(which guile)` if you run into the following error -
+```sh
+configure: error: 'guild' binary not found; please check your guile-2.x installation.
+```
+
+
 To build from git requires Autoconf and Automake.
 ```sh
 ./bootstrap
