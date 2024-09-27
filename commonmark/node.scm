@@ -64,6 +64,11 @@
             link-node?
             make-image-node
             image-node?
+            make-html-block-node
+            html-block-node-type
+            html-block-node?
+            make-inline-html-node
+            inline-html-node?
             child-closed?
             close-node
             last-child
@@ -93,6 +98,8 @@
 ;; - 'code-span
 ;; - 'emphasis
 ;; - 'link
+;; - 'html-block
+;; - 'inline-html
 ;; interp. The type of CommonMark block node
 
 ;; Node is (make-node Node-Type Node-Data (listof Node))
@@ -304,6 +311,22 @@
 
 (define (image-node? node)
   (node-type? node 'image))
+
+;; HTML nodes
+(define (html-block-node? node)
+  (node-type? node 'html-block))
+
+(define (make-html-block-node type str)
+  (make-node 'html-block `((type . ,type)) (list str)))
+
+(define (html-block-node-type node)
+  (node-get-data node 'type))
+
+(define (inline-html-node? node)
+  (node-type? node 'inline-html))
+
+(define (make-inline-html-node str)
+  (make-node 'inline-html #f (list str)))
 
 (define (child-closed? n)
   (node-closed? (last-child n)))

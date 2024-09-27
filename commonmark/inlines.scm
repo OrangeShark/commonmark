@@ -43,6 +43,36 @@
                                           "[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
                                           "(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)>")))
 
+;; Regexps for HTML.  It's complicated!  See section 6.6 of the
+;; CommonMark spec.
+(define %html-whitespace "[ \t\n]")
+(define %html-tag-name "([a-zA-Z][0-9a-zA-Z-]*)")
+(define %html-unquoted-attribute-value "[^ \t\n\"'=<>`]+")
+(define %html-single-quoted-attribute-value "'[^']*'")
+(define %html-double-quoted-attribute-value "\"[^\"]*\"")
+(define %html-attribute-value (string-append "(" %html-unquoted-attribute-value "|"
+                                             %html-single-quoted-attribute-value "|"
+                                             %html-double-quoted-attribute-value ")"))
+(define %html-attribute-value-spec (string-append %html-whitespace "*="
+                                                  %html-whitespace "*"
+                                                  %html-attribute-value))
+(define %html-attribute-name "[a-zA-Z_:][a-zA-Z0-9_.:-]*")
+(define %html-attribute (string-append %html-whitespace "+" %html-attribute-name
+                                       "(" %html-attribute-value-spec ")?"))
+(define re-html-open-tag
+  (make-regexp
+   (string-append "<" %html-tag-name "(" %html-attribute ")*"
+                  %html-whitespace "*/?>")))
+(define re-html-closing-tag
+  (make-regexp
+   (string-append "</" %html-tag-name %html-whitespace "*>")))
+(define re-html-comment (make-regexp "<!--.*-->"))
+(define re-html-end-comment (make-regexp "-->"))
+(define re-html-processing (make-regexp "<\\?.*\\?>"))
+(define re-html-end-processing (make-regexp "\\?>"))
+(define re-html-declaration (make-regexp "<![a-zA-Z].*>"))
+(define re-html-cdata (make-regexp "<!\\[CDATA\\[.*\\]\\]>"))
+(define re-html-end-cdata (make-regexp "\\]\\]>"))
 
 (define (start-ticks? text)
   (regexp-exec re-start-ticks (text-value text) (text-position text)))
@@ -226,6 +256,7 @@
     (define (parse-inner node)
       (cond ((not (node? node)) node)
             ((or (paragraph-node? node) (heading-node? node)) (parse-inline node ref-proc))
+            ((html-block-node? node) node)
             (else (make-node (node-type node) (node-data node) (map parse-inner (node-children node))))))
     (parse-inner node)))
 
@@ -473,11 +504,44 @@
                       (text-move text (match:end email-match 0)))
               (values #f text))))))
 
+(define (parse-html text nodes delim-stack ref-proc)
+  (define (finish html-match)
+    (values (make-inline-html-node (match:substring html-match))
+            (text-move text (match:end html-match))))
+  ;; Comment, processing, and cdata regexps may match too much.  For
+  ;; example, the comment regexp would match the entirety of "<---->
+  ;; foo -->" but we need to truncate the match to the first instance
+  ;; of "-->".
+  (define (finish/maybe-truncate html-match re)
+    (let* ((html-match (regexp-exec re (text-value text) (text-position text)))
+           (end (match:end html-match 0)))
+      (values (make-inline-html-node
+               (substring (text-value text) (text-position text) end))
+              (text-move text end))))
+  (define (regexp-exec* re)
+    (regexp-exec re (text-value text) (text-position text)))
+  (cond ((regexp-exec* re-html-open-tag) => finish)
+        ((regexp-exec* re-html-closing-tag) => finish)
+        ((regexp-exec* re-html-comment) =>
+         (lambda (html-match)
+           (finish/maybe-truncate html-match re-html-end-comment)))
+        ((regexp-exec* re-html-processing) =>
+         (lambda (html-match)
+           (finish/maybe-truncate html-match re-html-end-processing)))
+        ((regexp-exec* re-html-declaration) => finish)
+        ((regexp-exec* re-html-cdata) =>
+         (lambda (html-match)
+           (finish/maybe-truncate html-match re-html-end-cdata)))
+        (else (values #f text))))
+
 (define (parse-autolink-or-html text nodes delim-stack ref-proc)
   (let-values (((autolink text) (parse-autolink text)))
     (if autolink
         (parse-char text (cons autolink nodes) delim-stack ref-proc)
-        (parse-char (text-advance text 1) (cons (make-text-node "<") nodes) delim-stack ref-proc))))
+        (let-values (((html text) (parse-html text nodes delim-stack ref-proc)))
+          (if html
+              (parse-char text (cons html nodes) delim-stack ref-proc)
+              (parse-char (text-advance text 1) (cons (make-text-node "<") nodes) delim-stack ref-proc))))))
 
 
 (define (parse-entity-numeric text nodes delim-stack ref-proc)

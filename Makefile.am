@@ -8,6 +8,7 @@ SOURCES =                           \
   commonmark/node.scm               \
   commonmark/blocks.scm             \
   commonmark/inlines.scm            \
+  commonmark/html.scm               \
   commonmark/sxml.scm               \
   commonmark.scm
 
@@ -32,7 +33,8 @@ TESTS =	                                       \
   tests/inlines/links.scm                      \
   tests/inlines/images.scm                     \
   tests/inlines/autolinks.scm                  \
-  tests/inlines/entities.scm
+  tests/inlines/entities.scm                   \
+  tests/html.scm
 
 TEST_EXTENSIONS = .scm
 
