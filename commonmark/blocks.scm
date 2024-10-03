@@ -15,7 +15,8 @@
 ;; You should have received a copy of the GNU Lesser General Public License
 ;; along with guile-commonmark.  If not, see <http://www.gnu.org/licenses/>.
 
-(define-module (commonmark blocks) 
+(define-module (commonmark blocks)
+  #:use-module (ice-9 match)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-26)
   #:use-module (commonmark node)
@@ -46,7 +47,20 @@
         ((code-block-node? node) (parse-code-block node parser))
         ((fenced-code-node? node) (parse-fenced-code node parser))
         ((list-node? node) (parse-list node parser))
+        ((html-block-node? node) (parse-html node parser))
         ((paragraph-node? node) (parse-paragraph node parser))))
+
+(define (parse-html node parser)
+  (let ((type (html-block-node-type node))
+        (str (parser-rest-str parser)))
+    (match (node-children node)
+      ((html)
+       (if (html-block-end type parser)
+           (close-node
+            (if (string-null? str)
+                node
+                (make-html-block-node type (string-append html "\n" str))))
+           (make-html-block-node type (string-append html "\n" str)))))))
 
 ;; Node Parser -> Node
 (define (parse-container-block node parser)
@@ -60,7 +74,8 @@
                 (cond ((and (not (empty-line parser))
                             (node-closed? new-child)
                             (not (fenced-code-node? new-child))
-                            (not (heading-node? new-child)))
+                            (not (heading-node? new-child))
+                            (not (html-block-node? new-child)))
                        (add-child-node (replace-last-child node new-child)
                                        (parse-line parser)))
                       (else (replace-last-child node new-child)))))))
@@ -93,6 +108,11 @@
            (replace-last-child node (join-text-nodes (last-child node) (last-child parsed-line))))
           ((code-block-node? parsed-line)
            (replace-last-child node (add-text (last-child node) (parser-rest-str parser))))
+          ;; 1 of 7 types of HTML blocks is *not* allowed to interrupt
+          ;; a paragraph.
+          ((and (html-block-node? parsed-line)
+                (eq? (html-block-node-type parsed-line) 'other))
+           (replace-last-child node (add-text (last-child node) (last-child parsed-line))))
           (else (close-node node)))))
 
 (define (fence-start node)
@@ -207,6 +227,9 @@
   (let ((nonspace-parser (parser-advance-next-nonspace parser)))
     (cond ((empty-line nonspace-parser)              (make-blank-node))
           ((parser-indented? parser nonspace-parser) (make-code-block parser))
+          ((html-block nonspace-parser)           => (match-lambda
+                                                       ((type match)
+                                                        (make-html-block type parser))))
           ((thematic-break nonspace-parser)          (make-thematic-break))
           ((block-quote nonspace-parser)          => make-block-quote)
           ((atx-heading nonspace-parser)          => make-atx-heading)
@@ -215,6 +238,12 @@
           ((ordered-list-marker nonspace-parser)  => (cut make-ordered-list-marker parser <>))
           (else                                      (make-paragraph nonspace-parser)))))
 
+
+(define (make-html-block type parser)
+  (let ((node (make-html-block-node type (parser-rest-str parser))))
+    (if (html-block-end type parser)
+        (close-node node)
+        node)))
 
 (define (make-thematic-break)
   (make-thematic-break-node))

@@ -20,6 +20,7 @@
   #:use-module (srfi srfi-2)
   #:use-module (srfi srfi-9)
   #:use-module (srfi srfi-26)
+  #:use-module (ice-9 match)
   #:use-module (ice-9 regex)
   #:use-module (commonmark common)
   #:export (make-parser
@@ -61,7 +62,11 @@
             link-definition-rest
             link-definition-label
             link-definition-destination
-            link-definition-title))
+            link-definition-title
+            html-block
+            html-block-continue
+            html-block-end
+            html-block-string))
 
 (define-record-type <parser>
   (%make-parser str pos col)
@@ -175,7 +180,88 @@
                                                                  ")*)>")))
 (define re-link-destination (make-regexp link-destination))
 (define re-link-title (make-regexp link-title))
+(define re-html-block-special-start (make-regexp "^(<pre|<script|<style|<textarea)( |\t|>|$)" regexp/icase))
+(define re-html-block-special-end (make-regexp "(</pre>|</script>|</style>|</textarea>)" regexp/icase))
+(define re-html-block-comment-start (make-regexp "^<!--"))
+(define re-html-block-comment-end (make-regexp "-->"))
+(define re-html-block-template-start (make-regexp "^<\\?"))
+(define re-html-block-template-end (make-regexp "\\?>"))
+(define re-html-block-declaration-start (make-regexp "^<![a-zA-Z]"))
+(define re-html-block-declaration-end (make-regexp ">"))
+(define re-html-block-cdata-start (make-regexp "^<!\\[CDATA\\["))
+(define re-html-block-cdata-end (make-regexp "\\]\\]>"))
+(define re-html-block-well-known-start (make-regexp "^(<|</)(address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)( |\t|>|/>)" regexp/icase))
+(define re-html-tag-name (make-regexp "^[a-zA-Z][0-9a-zA-Z-]*"))
+(define %html-whitespace "[ \t]")
+(define %html-tag-name "([a-zA-Z][0-9a-zA-Z-]*)")
+(define %html-unquoted-attribute-value "[^ \t\"'=<>`]+")
+(define %html-single-quoted-attribute-value "'[^']*'")
+(define %html-double-quoted-attribute-value "\"[^\"]*\"")
+(define %html-attribute-value
+  (string-append "(" %html-unquoted-attribute-value "|"
+                 %html-single-quoted-attribute-value "|"
+                 %html-double-quoted-attribute-value ")"))
+(define %html-attribute-value-spec
+  (string-append %html-whitespace "*="
+                 %html-whitespace "*"
+                 %html-attribute-value))
+(define %html-attribute-name "[a-zA-Z_:][a-zA-Z0-9_.:-]*")
+(define %html-attribute
+  (string-append %html-whitespace "+" %html-attribute-name
+                 %html-attribute-value-spec))
+(define %html-open-tag
+  (string-append "<" %html-tag-name "(" %html-attribute ")*"
+                 %html-whitespace "*/?>"))
+(define %html-closing-tag
+  (string-append "</" %html-tag-name %html-whitespace "*>"))
+(define re-html-block-other-start
+  (make-regexp (string-append "^(" %html-open-tag "|" %html-closing-tag ")$")))
 
+
+(define (html-block parser)
+  (let ((str (parser-str parser))
+        (pos (parser-pos parser)))
+    (cond ((regexp-exec re-html-block-special-start str pos) =>
+           (lambda (match) (list 'special match)))
+          ((regexp-exec re-html-block-comment-start str pos) =>
+           (lambda (match) (list 'comment match)))
+          ((regexp-exec re-html-block-template-start str pos) =>
+           (lambda (match) (list 'template match)))
+          ((regexp-exec re-html-block-declaration-start str pos) =>
+           (lambda (match) (list 'declaration match)))
+          ((regexp-exec re-html-block-cdata-start str pos) =>
+           (lambda (match) (list 'cdata match)))
+          ((regexp-exec re-html-block-well-known-start str pos) =>
+           (lambda (match) (list 'well-known match)))
+          ((regexp-exec re-html-block-other-start str pos) =>
+           (lambda (match)
+             (let ((excluded-tags '("pre" "script" "style" "textarea")))
+               ;; Match 2 is the tag name for an open tag, match 5 is
+               ;; the tag name for a closing tag.
+               (and (not (member (match:substring match 2) excluded-tags))
+                    (not (member (match:substring match 5) excluded-tags))
+                    (list 'other match)))))
+          (else #f))))
+
+(define (html-block-end type parser)
+  (let ((str (parser-str parser))
+        (pos (parser-pos parser)))
+    (match type
+      ('special (regexp-exec re-html-block-special-end str pos))
+      ('comment (regexp-exec re-html-block-comment-end str pos))
+      ('template (regexp-exec re-html-block-template-end str pos))
+      ('declaration (regexp-exec re-html-block-declaration-end str pos))
+      ('cdata (regexp-exec re-html-block-cdata-end str pos))
+      ((or 'well-known 'other) (empty-line parser))
+      (_ #f))))
+
+(define (html-block-string match)
+  (substring (match:string match) (match:start match)))
+
+(define (html-tag-name parser)
+  (let ((match (regexp-exec re-html-tag-name (parser-str parser) (parser-pos parser))))
+    (and match
+         (parser-advance parser (- (match:end match) (parser-pos parser))))))
 
 (define (block-quote parser)
   (if (and (not (parser-end? parser)) (parser-char=? parser #\>))
